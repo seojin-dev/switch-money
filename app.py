@@ -163,6 +163,8 @@ if st.button("환율 예측 실행"):
                 elif "부정" in sentiment_result:
                     adjustment_factor = sensitivity / 100
                     st.error(f"📈 부정적 기사 → 원화 약세 → 환율 상승 (+{sensitivity:.1f}%)")
+                elif "중립" in sentiment_result:
+                    st.info("중립적 기사 → 환율 영향 없음")
 
             if len(next_prediction) == 0:
                 st.warning(f"{next_day} 환율 예측 없음")
