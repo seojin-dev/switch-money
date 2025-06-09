@@ -17,7 +17,7 @@ api_key = os.getenv("KOREA_EXIM_API_KEY")
 
 def set_korean_font():
     try:
-        font_path = "fonts/NanumGothic.ttf"
+        font_path = "fonts/NanumGothicCoding.ttf"
         font_name = font_manager.FontProperties(fname=font_path).get_name()
         rc('font', family=font_name)
         plt.rcParams['axes.unicode_minus'] = False
