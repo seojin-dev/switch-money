@@ -25,7 +25,7 @@ pip install -r requirements.txt
 ```
 
 2. API 키 설정
-   `app.py` 내에 다음 두 곳을 본인의 키로 수정
+   `.env` 파일을 생성하고, 그 파일 안에 다음 두 곳을 본인의 키로 수정
 
 ```python
 openai.api_key = "your-openai-api-key"
