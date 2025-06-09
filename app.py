@@ -17,13 +17,17 @@ api_key = os.getenv("KOREA_EXIM_API_KEY")
 
 def set_korean_font():
     try:
-        font_path = "fonts/NanumGothicCoding.ttf"
+        font_path = os.path.join("fonts", "NanumGothicCoding.ttf")
+        if not os.path.exists(font_path):
+            raise FileNotFoundError("NanumGothicCoding.ttf not found")
         font_name = font_manager.FontProperties(fname=font_path).get_name()
+        font_manager.fontManager.addfont(font_path)  # 폰트 등록
         rc('font', family=font_name)
         plt.rcParams['axes.unicode_minus'] = False
         print(f"[LOG] 한글 폰트 적용됨: {font_name}")
     except Exception as e:
         print(f"[WARN] 한글 폰트 적용 실패: {e}")
+
 
 
 set_korean_font()
