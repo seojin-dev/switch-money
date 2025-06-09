@@ -15,21 +15,16 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 api_key = os.getenv("KOREA_EXIM_API_KEY")
 
 
-# 한글 폰트 설정 함수
 def set_korean_font():
     try:
-        if platform.system() == 'Windows':
-            font_path = "C:/Windows/Fonts/malgun.ttf"
-        elif platform.system() == 'Darwin':
-            font_path = "/System/Library/Fonts/Supplemental/AppleGothic.ttf"
-        else:
-            font_path = "/usr/share/fonts/truetype/nanum/NanumGothic.ttf"
+        font_path = "fonts/NanumGothic.ttf"
         font_name = font_manager.FontProperties(fname=font_path).get_name()
         rc('font', family=font_name)
         plt.rcParams['axes.unicode_minus'] = False
         print(f"[LOG] 한글 폰트 적용됨: {font_name}")
     except Exception as e:
         print(f"[WARN] 한글 폰트 적용 실패: {e}")
+
 
 set_korean_font()
 
