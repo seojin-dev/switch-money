@@ -88,7 +88,7 @@ print(f"[LOG] Latest date in data: {latest_date}")
 # Streamlit UI 시작
 st.markdown("""
     <h1 style='text-align: center; color: #1e1e1e; font-size: 3em; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;'>
-        💱 AI 환율 예측 시스템<br>
+        💱 AI FxSense(AI환율예측시스템)<br>
         <span style='font-size: 0.5em;'>SWitch Money 팀 — 서울교육대학교 소프트웨어영재교육원</span><br>
         <span style='font-size: 0.5em;'>김서진, 김우현, 박재민</span>
     </h1>
