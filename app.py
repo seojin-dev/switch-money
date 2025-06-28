@@ -2,18 +2,20 @@ import streamlit as st
 from prophet import Prophet
 import pandas as pd
 import matplotlib.pyplot as plt
-from datetime import timedelta, date
+from datetime import timedelta, date, datetime
 import openai
 import platform
 from matplotlib import font_manager, rc
 from dotenv import load_dotenv
 import os
+import requests
+import plotly.graph_objects as go
 
 load_dotenv()
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 api_key = os.getenv("KOREA_EXIM_API_KEY")
-
+news_api_key = os.getenv("NEWS_API_KEY")  # NewsAPI 키도 .env에 추가 필요
 
 def set_korean_font():
     try:
@@ -21,18 +23,16 @@ def set_korean_font():
         if not os.path.exists(font_path):
             raise FileNotFoundError("NanumGothicCoding.ttf not found")
         font_name = font_manager.FontProperties(fname=font_path).get_name()
-        font_manager.fontManager.addfont(font_path)  # 폰트 등록
+        font_manager.fontManager.addfont(font_path)
         rc('font', family=font_name)
         plt.rcParams['axes.unicode_minus'] = False
         print(f"[LOG] 한글 폰트 적용됨: {font_name}")
     except Exception as e:
         print(f"[WARN] 한글 폰트 적용 실패: {e}")
 
-
-
 set_korean_font()
 
-# 환율 데이터 로딩 및 전처리
+# 환율 데이터 전처리
 print("[LOG] Loading and preprocessing data...")
 df = pd.read_csv("switch.csv")
 df['날짜'] = pd.to_datetime(df['변환'], format='%Y/%m/%d', errors='coerce')
@@ -40,19 +40,12 @@ df['환율'] = df['원자료'].str.replace(',', '').astype(float)
 df = df[['날짜', '환율']].dropna().sort_values('날짜')
 df = df.rename(columns={'날짜': 'ds', '환율': 'y'})
 
-# Prophet 모델 학습
-print("[LOG] Fitting Prophet model...")
-
-# 한국수출입은행 API에서 2025-05-03 이후 실시간 데이터 가져오기 
-import requests
-from datetime import datetime
-
+# API 환율 데이터 추가
 def fetch_korea_exim_rates(start_date, end_date, auth_key):
     url = f"https://www.koreaexim.go.kr/site/program/financial/exchangeJSON?authkey={auth_key}&searchdate={{}}&data=AP01"
     records = []
     current = pd.to_datetime(start_date)
     end = pd.to_datetime(end_date)
-
     while current <= end:
         formatted = current.strftime("%Y%m%d")
         try:
@@ -60,64 +53,39 @@ def fetch_korea_exim_rates(start_date, end_date, auth_key):
             data = res.json()
             for item in data:
                 if item['cur_unit'] == 'USD':
-                    records.append({"ds": pd.to_datetime(item['deal_bas_r'].replace(',', ''), errors='coerce', format='%Y-%m-%d'),
-                                     "y": float(item['deal_bas_r'].replace(',', '')),
-                                     "date": current})
+                    records.append({"ds": current, "y": float(item['deal_bas_r'].replace(',', ''))})
                     break
         except Exception as e:
             print(f"[WARN] Failed to fetch for {formatted}: {e}")
         current += timedelta(days=1)
+    return pd.DataFrame(records)
 
-    return pd.DataFrame([{"ds": r["date"], "y": r["y"]} for r in records if r["y"] is not None])
-
-fetch_start = pd.to_datetime("2025-05-03")
-fetch_end = pd.to_datetime(date.today())
-api_df = fetch_korea_exim_rates(fetch_start, fetch_end, api_key)
-
-# 데이터 병합 및 중복 제거
+api_df = fetch_korea_exim_rates("2025-05-03", date.today(), api_key)
 df = pd.concat([df, api_df]).drop_duplicates(subset="ds").sort_values("ds")
+
 model = Prophet()
 model.fit(df)
 
-
-# 마지막 날짜 추출
 latest_date = df['ds'].max()
-print(f"[LOG] Latest date in data: {latest_date}")
 
-# Streamlit UI 시작
+# Streamlit UI
 st.markdown("""
-    <h1 style='text-align: center; color: #1e1e1e; font-size: 3em; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;'>
+    <h1 style='text-align: center;'>
         💱 AI FxSense(AI환율예측시스템)<br>
         <span style='font-size: 0.5em;'>SWitch Money 팀 — 서울교육대학교 소프트웨어영재교육원</span><br>
         <span style='font-size: 0.5em;'>김서진, 김우현, 박재민</span>
     </h1>
 """, unsafe_allow_html=True)
 
-# 초기화 버튼
-
-st.markdown("""
-<div style='text-align: center;'>
-    
-</div>
-""", unsafe_allow_html=True)
-
 if st.button("초기화"):
     st.session_state.clear()
     st.rerun()
-st.markdown("""
-<div style='text-align: center;'>
-    <p style='font-size: 1.2em;'>기사 내용을 입력하세요:</p>
-</div>
-""", unsafe_allow_html=True)
+
+st.markdown("<p style='text-align: center;'>기사 내용을 입력하세요:</p>", unsafe_allow_html=True)
 article_text = st.text_area("기사 입력", label_visibility="collapsed", height=150)
+days = st.number_input("그래프에 표시할 미래 일수", min_value=1, max_value=3650, value=30, step=1)
+sensitivity = st.slider("감성 보정 강도", min_value=0.0, max_value=1.0, value=0.3, step=0.1)
 
-from datetime import date
-
-today_input = date.today()
-days = st.number_input("그래프에 표시할 미래 일수 (예: 30)", min_value=1, max_value=3650, value=30, step=1)
-sensitivity = st.slider("감성 보정 강도 (% 조정폭)", min_value=0.0, max_value=1.0, value=0.3, step=0.1)
-
-# 감성 분석 함수 (OpenAI >=1.0.0 호환)
 def analyze_article_sentiment(article):
     prompt = f"""
     아래 기사가 원/달러 환율에 어떤 영향을 미칠지 판단해줘.
@@ -130,84 +98,66 @@ def analyze_article_sentiment(article):
             model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": prompt}]
         )
-        reply = response.choices[0].message.content
-        return reply
+        return response.choices[0].message.content
     except Exception as e:
         return f"[ERROR] 감성 분석 실패: {e}"
 
 if st.button("환율 예측 실행"):
+    if 'predicted' not in st.session_state:
+        st.session_state['predicted'] = True
+        future = model.make_future_dataframe(periods=days)
+        forecast = model.predict(future)
+        next_day = date.today() + timedelta(days=1)
+        next_pred = forecast[forecast['ds'] == pd.to_datetime(next_day)]['yhat'].values
+        adj = 0.0
+        if article_text.strip():
+            st.subheader("AI 감성 분석 결과")
+            sentiment_result = analyze_article_sentiment(article_text)
+            st.write(sentiment_result)
+            if "긍정" in sentiment_result:
+                adj = -sensitivity / 100
+            elif "부정" in sentiment_result:
+                adj = sensitivity / 100
+        if len(next_pred) > 0:
+            raw = next_pred[0]
+            adj_val = raw * (1 + adj)
+            st.success(f"예측 환율: {raw:.2f}₩ (감성 보정: {adj_val:.2f}₩)")
+        fig, ax = plt.subplots(figsize=(10, 4))
+        ax.plot(df['ds'], df['y'], label='실제 환율', color='black')
+        ax.plot(forecast['ds'], forecast['yhat'], label='예측 환율', color='blue')
+        ax.fill_between(forecast['ds'], forecast['yhat_lower'], forecast['yhat_upper'], color='lightblue', alpha=0.4)
+        ax.axvline(x=latest_date, color='gray', linestyle='--')
+        ax.set_xlim([latest_date - timedelta(days=100), forecast['ds'].max()])
+        ax.set_ylim(0, 2000)
+        st.pyplot(fig)
+        st.download_button("예측 결과 다운로드 (CSV)", forecast.to_csv(index=False).encode('utf-8-sig'), "환율_예측.csv")
+
+# 📌 과거 전체 시계열 및 기사 검색 기능
+st.subheader("과거 전체 환율 그래프")
+fig2 = go.Figure()
+fig2.add_trace(go.Scatter(x=df['ds'], y=df['y'], mode='lines+markers', name='환율'))
+fig2.update_layout(title="전체 환율 추이", xaxis_title="날짜", yaxis_title="₩", hovermode='x unified')
+st.plotly_chart(fig2, use_container_width=True)
+
+selected_date = st.date_input("기사를 보고 싶은 날짜 선택", value=date.today())
+
+def fetch_news_for_date(target_date):
+    query = f"환율+OR+경제+OR+무역+OR+금리"
+    url = f"https://newsapi.org/v2/everything?q={query}&from={target_date}&to={target_date}&language=ko&sortBy=relevancy&apiKey={news_api_key}"
     try:
-        if 'predicted' not in st.session_state:
-            st.session_state['predicted'] = True
-            print("[LOG] Creating future dataframe...")
-            delta_days = (today_input + timedelta(days=1) - latest_date.date()).days
-            periods_needed = max(delta_days, days)
-            future = model.make_future_dataframe(periods=periods_needed)
-            print("[LOG] Predicting future...")
-            forecast = model.predict(future)
-
-            # 내일 환율 예측
-            next_day = today_input + timedelta(days=1)
-            next_prediction = forecast[forecast['ds'] == pd.to_datetime(next_day)]['yhat'].values
-
-            # 감성 분석 결과
-            adjustment_factor = 0.0
-            if article_text.strip():
-                st.subheader("AI 감성 분석 결과")
-                sentiment_result = analyze_article_sentiment(article_text)
-                st.write(sentiment_result)
-
-                if "긍정" in sentiment_result:
-                    adjustment_factor = -sensitivity / 100
-                    st.success(f"📉 긍정적 기사 → 원화 강세 → 환율 하락 (-{sensitivity:.1f}%)")
-                elif "부정" in sentiment_result:
-                    adjustment_factor = sensitivity / 100
-                    st.error(f"📈 부정적 기사 → 원화 약세 → 환율 상승 (+{sensitivity:.1f}%)")
-                elif "중립" in sentiment_result:
-                    st.info("중립적 기사 → 환율 영향 없음")
-
-            if len(next_prediction) == 0:
-                st.warning(f"{next_day} 환율 예측 없음")
-                print(f"[WARN] No prediction available for {next_day}")
-            else:
-                adjusted = next_prediction[0] * (1 + adjustment_factor)
-                st.success(f"{next_day} 환율 예측: {next_prediction[0]:.2f} ₩")
-                if adjustment_factor != 0.0:
-                    st.info(f"감성 분석 반영 환율: {adjusted:.2f} ₩")
-
-            # 그래프 그리기
-            print("[LOG] Plotting forecast...")
-            fig, ax = plt.subplots(figsize=(10, 4))
-            ax.plot(df['ds'], df['y'], label='실제 환율', color='black')
-            ax.plot(forecast['ds'], forecast['yhat'], label='예측 환율', color='blue')
-            ax.fill_between(forecast['ds'], forecast['yhat_lower'], forecast['yhat_upper'],
-                            color='lightblue', alpha=0.4)
-            ax.set_xlim([latest_date - timedelta(days=100), forecast['ds'].max()])
-            ax.set_ylim(0, 2000)
-            ax.set_title('환율 예측 그래프')
-            ax.set_xlabel('날짜')
-            ax.set_ylabel('환율 (₩)')
-            ax.legend()
-            ax.axvline(x=latest_date, color='gray', linestyle='--', label='예측 시작')
-            st.pyplot(fig)
-
-            # 예측 결과 다운로드
-            st.download_button(
-                label="예측 결과 다운로드 (CSV)",
-                data=forecast.to_csv(index=False).encode('utf-8-sig'),
-                file_name='환율_예측.csv',
-                mime='text/csv'
-            )
-        else:
-            print("[INFO] Prediction already run this session")
-
+        res = requests.get(url)
+        articles = res.json().get('articles', [])[:10]
+        return [{"title": a['title'], "url": a['url']} for a in articles]
     except Exception as e:
-        st.error(f"오류 발생: {e}")
-        print(f"[ERROR] {e}")
+        return [
+            {"title": f"뉴스 로딩 실패: {e}", "url": "#"}
+        ]
 
-    except Exception as e:
-        st.error(f"오류 발생: {e}")
-        print(f"[ERROR] {e}")
+if st.button("선택한 날짜 기사 보기"):
+    news_list = fetch_news_for_date(selected_date)
+    st.subheader(f"{selected_date} 주요 뉴스")
+    for i, news in enumerate(news_list):
+        st.markdown(f"{i+1}. [{news['title']}]({news['url']})")
 
 st.markdown("""
 <div style='text-align: center; margin-top: 2em;'>
